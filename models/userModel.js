@@ -1,5 +1,20 @@
 const mongoose = require('mongoose');
 
+const serviceProviderProfileSchema = new mongoose.Schema({
+  companyName: { type: String, trim: true },
+  businessType: { type: String, trim: true },
+  businessLicenseNumber: { type: String, trim: true },
+  phoneNumber: { type: String, trim: true },
+  website: { type: String, trim: true },
+  address: { type: String, trim: true },
+  description: { type: String, trim: true },
+  approvalStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'pending'
+  },
+}, { _id: false }); // prevents nested _id field
+
 const userSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -18,7 +33,7 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['user', 'admin'],
+    enum: ['user', 'service_provider', 'admin'],
     default: 'user',
   },
   isVerified: {
@@ -37,10 +52,17 @@ const userSchema = new mongoose.Schema({
   passwordResetExpires: {
     type: Date,
   },
-  createdAt: {
-    type: Date,
-    default: Date.now,
+  avatar: {
+    type: String,
+    default: '/uploads/default-avatar.png',
   },
+
+  // ✅ Service Provider fields (only if user is service_provider)
+  serviceProviderProfile: {
+    type: serviceProviderProfileSchema,
+    default: null
+  },
+
 }, {
   timestamps: true,
 });
