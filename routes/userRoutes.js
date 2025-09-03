@@ -14,10 +14,17 @@ const {
   deleteMyAccount,
   uploadAvatar,
   submitServiceProviderProfile,
+  listServiceProviders, 
+  approveServiceProvider, 
+  rejectServiceProvider,
+  getAdminStats,       
+  listUsers 
 } = require('../controllers/userController');
 
 const { protect } = require('../middleware/authMiddleware');
 const { authorizeRoles } = require('../middleware/roleMiddleware');
+
+
 
 // ✅ Multer config
 const storage = multer.diskStorage({
@@ -109,6 +116,42 @@ router.put('/approve-provider/:id', protect, authorizeRoles('admin'), async (req
     res.status(500).json({ message: err.message });
   }
 });
+
+// --- ADD admin listing + approve/reject ---
+router.get(
+  '/admin/providers',
+  protect,
+  authorizeRoles('admin'),
+  listServiceProviders
+);
+
+router.put(
+  '/admin/providers/:id/approve',
+  protect,
+  authorizeRoles('admin'),
+  approveServiceProvider
+);
+
+router.put(
+  '/admin/providers/:id/reject',
+  protect,
+  authorizeRoles('admin'),
+  rejectServiceProvider
+);
+router.get(
+  '/admin/stats',
+  protect,
+  authorizeRoles('admin'),
+  getAdminStats
+);
+
+router.get(
+  '/admin/users',
+  protect,
+  authorizeRoles('admin'),
+  listUsers
+);
+
 
 
 module.exports = router;

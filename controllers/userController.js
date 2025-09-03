@@ -254,3 +254,157 @@ exports.deleteMyAccount = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+// List providers by status (pending|approved|rejected) — default: all
+exports.listServiceProviders = async (req, res) => {
+  try {
+    const { status } = req.query;
+    const filter = { role: 'service_provider' };
+
+    if (status) {
+      filter['serviceProviderProfile.approvalStatus'] = status;
+    }
+
+    // return only fields we need
+    const providers = await User.find(
+      filter,
+      'name email avatar serviceProviderProfile createdAt'
+    ).sort({ createdAt: -1 });
+
+    res.json({ providers });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// Approve provider
+exports.approveServiceProvider = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+
+    if (!user || user.role !== 'service_provider') {
+      return res.status(404).json({ message: 'Service provider not found' });
+    }
+    if (!user.serviceProviderProfile) {
+      return res.status(400).json({ message: 'No profile submitted by this user' });
+    }
+
+    user.serviceProviderProfile.approvalStatus = 'approved';
+    await user.save();
+
+    res.json({ message: 'Service provider approved', userId: user._id });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// Reject provider
+exports.rejectServiceProvider = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+
+    if (!user || user.role !== 'service_provider') {
+      return res.status(404).json({ message: 'Service provider not found' });
+    }
+    if (!user.serviceProviderProfile) {
+      return res.status(400).json({ message: 'No profile submitted by this user' });
+    }
+
+    user.serviceProviderProfile.approvalStatus = 'rejected';
+    await user.save();
+
+    res.json({ message: 'Service provider rejected', userId: user._id });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+exports.getAdminStats = async (req, res) => {
+  try {
+    const totalUsers = await User.countDocuments({});
+    const totalProviders = await User.countDocuments({ role: 'service_provider' });
+
+    const providersByStatusAgg = await User.aggregate([
+      { $match: { role: 'service_provider' } },
+      {
+        $group: {
+          _id: '$serviceProviderProfile.approvalStatus',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+    const providersByStatus = {
+      pending: 0, approved: 0, rejected: 0
+    };
+    for (const row of providersByStatusAgg) {
+      if (row._id && providersByStatus[row._id] !== undefined) {
+        providersByStatus[row._id] = row.count;
+      }
+    }
+
+    // last 7 days signups (daily)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6); // include today
+
+    const dailySignups = await User.aggregate([
+      { $match: { createdAt: { $gte: new Date(sevenDaysAgo.setHours(0,0,0,0)) } } },
+      {
+        $group: {
+          _id: {
+            y: { $year: '$createdAt' },
+            m: { $month: '$createdAt' },
+            d: { $dayOfMonth: '$createdAt' }
+          },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { '_id.y': 1, '_id.m': 1, '_id.d': 1 } }
+    ]);
+
+    res.json({
+      totalUsers,
+      totalProviders,
+      providersByStatus, // {pending, approved, rejected}
+      dailySignups       // array of { _id:{y,m,d}, count }
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+exports.listUsers = async (req, res) => {
+  try {
+    const page  = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const skip  = (page - 1) * limit;
+    const { search, role } = req.query;
+
+    const filter = {};
+    if (role) filter.role = role;
+    if (search) {
+      filter.$or = [
+        { name:  { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const [items, total] = await Promise.all([
+      User.find(filter, 'name email role avatar serviceProviderProfile createdAt')
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit),
+      User.countDocuments(filter)
+    ]);
+
+    res.json({
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
