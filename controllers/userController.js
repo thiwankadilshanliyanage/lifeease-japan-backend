@@ -4,14 +4,14 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const sendEmail = require('../utils/sendEmail');
 
-// 🔑 Token generator
-const generateToken = (userId, role) => {
-  return jwt.sign({ id: userId, role }, process.env.JWT_SECRET, {
+// generate JWT
+const generateToken = (userId, role) =>
+  jwt.sign({ id: userId, role }, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN || '30d',
   });
-};
 
-// 📝 Register
+// ---------- Auth ----------
+
 exports.registerUser = async (req, res) => {
   try {
     const { name, email, password, isServiceProvider } = req.body;
@@ -47,49 +47,6 @@ exports.registerUser = async (req, res) => {
   }
 };
 
-// 📄 Submit service provider profile
-exports.submitServiceProviderProfile = async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id);
-
-    if (!user || user.role !== 'service_provider') {
-      return res.status(403).json({ message: 'Only service providers can submit profile' });
-    }
-
-    const {
-      companyName,
-      businessLicenseNumber,
-      phone,
-      website,
-      address,
-      services,
-      experienceYears,
-      description,
-    } = req.body;
-
-    user.serviceProviderProfile = {
-      companyName,
-      businessLicenseNumber,
-      phone,
-      website,
-      address,
-      services,
-      experienceYears,
-      description,
-      submittedAt: new Date(),
-      approved: false, // default
-    };
-
-    await user.save();
-
-    res.json({ message: 'Profile submitted for approval', profile: user.serviceProviderProfile });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-};
-
-
-// ✅ Email verification
 exports.verifyEmail = async (req, res) => {
   try {
     const user = await User.findOne({
@@ -109,10 +66,10 @@ exports.verifyEmail = async (req, res) => {
   }
 };
 
-// 🔐 Login
 exports.loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
+
     const user = await User.findOne({ email });
     if (!user || !(await bcrypt.compare(password, user.password)))
       return res.status(400).json({ message: 'Invalid credentials' });
@@ -136,21 +93,21 @@ exports.loginUser = async (req, res) => {
   }
 };
 
-// 🔄 Forgot Password
+// ---------- Password ----------
+
 exports.forgotPassword = async (req, res) => {
   try {
-    const user = await User.findOne({ email: req.body.email });
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    const u = await User.findOne({ email: req.body.email });
+    if (!u) return res.status(404).json({ message: 'User not found' });
 
     const token = crypto.randomBytes(32).toString('hex');
-    user.passwordResetToken = token;
-    user.passwordResetExpires = Date.now() + 60 * 60 * 1000;
-
-    await user.save();
+    u.passwordResetToken = token;
+    u.passwordResetExpires = Date.now() + 60 * 60 * 1000;
+    await u.save();
 
     const resetUrl = `http://localhost:5000/api/users/reset-password/${token}`;
     const message = `<p>Reset your password:</p><a href="${resetUrl}">${resetUrl}</a>`;
-    await sendEmail(user.email, 'Password Reset', message);
+    await sendEmail(u.email, 'Password Reset', message);
 
     res.json({ message: 'Reset email sent' });
   } catch (err) {
@@ -158,79 +115,87 @@ exports.forgotPassword = async (req, res) => {
   }
 };
 
-// 🔄 Reset password
 exports.resetPassword = async (req, res) => {
   try {
-    const user = await User.findOne({
+    const u = await User.findOne({
       passwordResetToken: req.params.token,
       passwordResetExpires: { $gt: Date.now() },
     });
-    if (!user) return res.status(400).json({ message: 'Invalid or expired token' });
+    if (!u) return res.status(400).json({ message: 'Invalid or expired token' });
 
-    user.password = await bcrypt.hash(req.body.password, 10);
-    user.passwordResetToken = undefined;
-    user.passwordResetExpires = undefined;
+    u.password = await bcrypt.hash(req.body.password, 10);
+    u.passwordResetToken = undefined;
+    u.passwordResetExpires = undefined;
 
-    await user.save();
+    await u.save();
     res.json({ message: 'Password reset successful' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-// 👤 Update profile
+// ---------- Profile ----------
+
+exports.getMyProfile = async (req, res) => {
+  try {
+    const u = await User.findById(req.user._id).select(
+      '-password -verificationToken -verificationTokenExpires -passwordResetToken -passwordResetExpires'
+    );
+    if (!u) return res.status(404).json({ message: 'User not found' });
+    res.json(u);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
 exports.updateUserProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    const u = await User.findById(req.user._id);
+    if (!u) return res.status(404).json({ message: 'User not found' });
 
-    user.name = req.body.name || user.name;
-    user.email = req.body.email || user.email;
+    u.name = req.body.name || u.name;
+    u.email = req.body.email || u.email;
 
     if (req.body.password) {
-      user.password = await bcrypt.hash(req.body.password, 10);
+      u.password = await bcrypt.hash(req.body.password, 10);
     }
 
-    await user.save();
+    await u.save();
 
-    res.json({ message: 'Profile updated', user });
+    res.json({ message: 'Profile updated', user: u });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-// 🖼️ Upload Avatar
 exports.uploadAvatar = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
+    const u = await User.findById(req.user._id);
+    if (!u) return res.status(404).json({ message: 'User not found' });
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
-    user.avatar = `/uploads/avatars/${req.file.filename}`;
-    await user.save();
+    u.avatar = `/uploads/avatars/${req.file.filename}`;
+    await u.save();
 
-    res.json({ message: 'Avatar uploaded', avatar: user.avatar });
+    res.json({ message: 'Avatar uploaded', avatar: u.avatar });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-// 🔄 Resend verification
 exports.resendVerificationEmail = async (req, res) => {
   try {
-    const user = await User.findOne({ email: req.body.email });
-    if (!user) return res.status(404).json({ message: 'User not found' });
-    if (user.isVerified) return res.status(400).json({ message: 'Already verified' });
+    const u = await User.findOne({ email: req.body.email });
+    if (!u) return res.status(404).json({ message: 'User not found' });
+    if (u.isVerified) return res.status(400).json({ message: 'Already verified' });
 
-    user.verificationToken = crypto.randomBytes(32).toString('hex');
-    user.verificationTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
+    u.verificationToken = crypto.randomBytes(32).toString('hex');
+    u.verificationTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
+    await u.save();
 
-    await user.save();
-
-    const verificationUrl = `http://localhost:5000/api/users/verify-email/${user.verificationToken}`;
+    const verificationUrl = `http://localhost:5000/api/users/verify-email/${u.verificationToken}`;
     const message = `<p>Verify your email:</p><a href="${verificationUrl}">${verificationUrl}</a>`;
-    await sendEmail(user.email, 'Verify Email', message);
+    await sendEmail(u.email, 'Verify Email', message);
 
     res.json({ message: 'Verification email resent' });
   } catch (err) {
@@ -238,33 +203,73 @@ exports.resendVerificationEmail = async (req, res) => {
   }
 };
 
-// ❌ Delete account
 exports.deleteMyAccount = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    const u = await User.findById(req.user._id);
+    if (!u) return res.status(404).json({ message: 'User not found' });
 
-    const match = await bcrypt.compare(req.body.password, user.password);
+    const match = await bcrypt.compare(req.body.password, u.password);
     if (!match) return res.status(401).json({ message: 'Incorrect password' });
 
-    await user.deleteOne();
-
+    await u.deleteOne();
     res.json({ message: 'Account deleted' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
+
+// ---------- Service Provider profile submit ----------
+
+exports.submitServiceProviderProfile = async (req, res) => {
+  try {
+    const u = await User.findById(req.user._id);
+    if (!u || u.role !== 'service_provider') {
+      return res.status(403).json({ message: 'Only service providers can submit profile' });
+    }
+
+    const {
+      companyName,
+      businessType,
+      businessLicenseNumber,
+      phoneNumber,
+      website,
+      address,
+      description,
+      services,
+      experienceYears,
+    } = req.body;
+
+    u.serviceProviderProfile = {
+      companyName,
+      businessType,
+      businessLicenseNumber,
+      phoneNumber,
+      website,
+      address,
+      description,
+      services: Array.isArray(services) ? services : services ? [services] : [],
+      experienceYears: typeof experienceYears === 'number' ? experienceYears : undefined,
+      submittedAt: new Date(),
+      approvalStatus: 'pending',
+    };
+
+    await u.save();
+
+    res.json({ message: 'Profile submitted for approval', profile: u.serviceProviderProfile });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// ---------- Admin: providers & stats ----------
+
 // List providers by status (pending|approved|rejected) — default: all
 exports.listServiceProviders = async (req, res) => {
   try {
     const { status } = req.query;
     const filter = { role: 'service_provider' };
+    if (status) filter['serviceProviderProfile.approvalStatus'] = status;
 
-    if (status) {
-      filter['serviceProviderProfile.approvalStatus'] = status;
-    }
-
-    // return only fields we need
     const providers = await User.find(
       filter,
       'name email avatar serviceProviderProfile createdAt'
@@ -276,43 +281,39 @@ exports.listServiceProviders = async (req, res) => {
   }
 };
 
-// Approve provider
 exports.approveServiceProvider = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id);
-
-    if (!user || user.role !== 'service_provider') {
+    const u = await User.findById(req.params.id);
+    if (!u || u.role !== 'service_provider') {
       return res.status(404).json({ message: 'Service provider not found' });
     }
-    if (!user.serviceProviderProfile) {
+    if (!u.serviceProviderProfile) {
       return res.status(400).json({ message: 'No profile submitted by this user' });
     }
 
-    user.serviceProviderProfile.approvalStatus = 'approved';
-    await user.save();
+    u.serviceProviderProfile.approvalStatus = 'approved';
+    await u.save();
 
-    res.json({ message: 'Service provider approved', userId: user._id });
+    res.json({ message: 'Service provider approved', userId: u._id });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-// Reject provider
 exports.rejectServiceProvider = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id);
-
-    if (!user || user.role !== 'service_provider') {
+    const u = await User.findById(req.params.id);
+    if (!u || u.role !== 'service_provider') {
       return res.status(404).json({ message: 'Service provider not found' });
     }
-    if (!user.serviceProviderProfile) {
+    if (!u.serviceProviderProfile) {
       return res.status(400).json({ message: 'No profile submitted by this user' });
     }
 
-    user.serviceProviderProfile.approvalStatus = 'rejected';
-    await user.save();
+    u.serviceProviderProfile.approvalStatus = 'rejected';
+    await u.save();
 
-    res.json({ message: 'Service provider rejected', userId: user._id });
+    res.json({ message: 'Service provider rejected', userId: u._id });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -325,86 +326,90 @@ exports.getAdminStats = async (req, res) => {
 
     const providersByStatusAgg = await User.aggregate([
       { $match: { role: 'service_provider' } },
-      {
-        $group: {
-          _id: '$serviceProviderProfile.approvalStatus',
-          count: { $sum: 1 }
-        }
-      }
+      { $group: { _id: '$serviceProviderProfile.approvalStatus', count: { $sum: 1 } } },
     ]);
-    const providersByStatus = {
-      pending: 0, approved: 0, rejected: 0
-    };
+
+    const providersByStatus = { pending: 0, approved: 0, rejected: 0 };
     for (const row of providersByStatusAgg) {
       if (row._id && providersByStatus[row._id] !== undefined) {
         providersByStatus[row._id] = row.count;
       }
     }
 
-    // last 7 days signups (daily)
     const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6); // include today
-
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
     const dailySignups = await User.aggregate([
-      { $match: { createdAt: { $gte: new Date(sevenDaysAgo.setHours(0,0,0,0)) } } },
+      { $match: { createdAt: { $gte: new Date(sevenDaysAgo.setHours(0, 0, 0, 0)) } } },
       {
         $group: {
-          _id: {
-            y: { $year: '$createdAt' },
-            m: { $month: '$createdAt' },
-            d: { $dayOfMonth: '$createdAt' }
-          },
-          count: { $sum: 1 }
-        }
+          _id: { y: { $year: '$createdAt' }, m: { $month: '$createdAt' }, d: { $dayOfMonth: '$createdAt' } },
+          count: { $sum: 1 },
+        },
       },
-      { $sort: { '_id.y': 1, '_id.m': 1, '_id.d': 1 } }
+      { $sort: { '_id.y': 1, '_id.m': 1, '_id.d': 1 } },
     ]);
 
-    res.json({
-      totalUsers,
-      totalProviders,
-      providersByStatus, // {pending, approved, rejected}
-      dailySignups       // array of { _id:{y,m,d}, count }
-    });
+    res.json({ totalUsers, totalProviders, providersByStatus, dailySignups });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
+
 exports.listUsers = async (req, res) => {
   try {
-    const page  = Math.max(parseInt(req.query.page) || 1, 1);
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
-    const skip  = (page - 1) * limit;
+    const skip = (page - 1) * limit;
     const { search, role } = req.query;
 
     const filter = {};
     if (role) filter.role = role;
     if (search) {
       filter.$or = [
-        { name:  { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } }
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
       ];
     }
 
     const [items, total] = await Promise.all([
       User.find(filter, 'name email role avatar serviceProviderProfile createdAt')
-          .sort({ createdAt: -1 })
-          .skip(skip)
-          .limit(limit),
-      User.countDocuments(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      User.countDocuments(filter),
     ]);
 
     res.json({
       items,
-      pagination: {
-        page,
-        limit,
-        total,
-        pages: Math.ceil(total / limit)
-      }
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
+exports.getAdminOverview = async (req, res) => {
+  try {
+    const totalUsers = await User.countDocuments({ role: 'user' });
+    const totalProviders = await User.countDocuments({ role: 'service_provider' });
+    const approvedProviders = await User.countDocuments({
+      role: 'service_provider',
+      'serviceProviderProfile.approvalStatus': 'approved',
+    });
+    const pendingProviders = await User.countDocuments({
+      role: 'service_provider',
+      'serviceProviderProfile.approvalStatus': 'pending',
+    });
+
+    const recentUsers = await User.find({}, 'name email role createdAt')
+      .sort({ createdAt: -1 })
+      .limit(8);
+
+    res.json({
+      totals: { totalUsers, totalProviders, approvedProviders, pendingProviders },
+      recentUsers,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
