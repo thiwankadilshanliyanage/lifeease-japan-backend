@@ -3,9 +3,14 @@ const dotenv = require('dotenv');
 const cors = require('cors');
 const path = require('path');
 const connectDB = require('./config/db');
+
 const userRoutes = require('./routes/userRoutes');
 const serviceRoutes = require('./routes/serviceRoutes');
-const serviceUploadRoutes = require('./routes/serviceUploadRoutes'); 
+const serviceUploadRoutes = require('./routes/serviceUploadRoutes');
+const bookingRoutes = require('./routes/bookingRoutes'); // ✅ NEW
+const chatRoutes = require('./routes/chatRoutes'); // router for /api/chat
+
+
 
 dotenv.config();
 connectDB();
@@ -27,6 +32,8 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/api/users', userRoutes);
 app.use('/api/services', serviceRoutes);
 app.use('/api/services', serviceUploadRoutes);
+app.use('/api/bookings', bookingRoutes); // ✅ NEW
+app.use('/api/chat', chatRoutes);
 
 // ---------- Server ----------
 const PORT = process.env.PORT || 5000;
